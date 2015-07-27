@@ -1,4 +1,10 @@
-*~
+*~*
 *.swap
 *.pyc
 *Rhistory
+*RData
+*.swp
+*.ipynb
+screenlog*
+*.ign
+*.ignore
