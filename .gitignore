@@ -4,12 +4,10 @@
 *Rhistory
 *RData
 *.swp
-*.ipynb
 screenlog*
 *.ign
 *.ignore
 .nfs*
-*ipynb
 trash*
 *.zip
 *.rar
