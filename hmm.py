@@ -51,12 +51,14 @@ class HMM(object):
         self.A = copy.copy(A)
         self.B = copy.copy(B)
 
-    def init_params(self, Status, Observations):
+    def init_params(self, Status = None, Observations = None):
         '''
         for Baum_Welch_algorithm
         '''
-        self.Status = copy.copy(Status)
-        self.Observations = copy.copy(Observations)
+        if Status: # may already exist in self
+            self.Status = copy.copy(Status)
+        if Observations:
+            self.Observations = copy.copy(Observations)
         self.num_s = len(self.Status)
         self.num_o = len(self.Observations)
         self.S2idx = Series(range(self.num_s), index=self.Status)
@@ -78,10 +80,7 @@ class HMM(object):
         for t in range(1, num_obs):
             oidx = self.O2idx[obs[t]]
             for j in range(self.num_s):
-                tmp = 0
-                for i in range(self.num_s):
-                    tmp += alpha[i, t - 1] * self.A[i, j]
-                alpha[j, t] = tmp * self.B[j, oidx]
+                alpha[j, t] = (alpha[:, t - 1] * self.A[:, j]).sum() * self.B[j, oidx]
         return alpha
 
     def calc_beta(self, obs):
@@ -95,10 +94,7 @@ class HMM(object):
         for t in range(num_obs - 2, -1, -1):
             oidx_t1 = self.O2idx[obs[t + 1]]
             for i in range(self.num_s):
-                tmp = 0
-                for j in range(self.num_s):
-                    tmp += self.A[i, j] * self.B[j, oidx_t1] * beta[j, t + 1]
-                beta[i, t] = tmp
+                beta[i, t] = (self.A[i, :] * self.B[:, oidx_t1] * beta[:, t + 1]).sum()
         return beta
 
     def calc_vertibi_and_prev(self, obs):
@@ -117,14 +113,10 @@ class HMM(object):
         for t in range(1, num_obs):
             oidx = self.O2idx[obs[t]]
             for j in range(self.num_s):
-                best_prob, best_prev = vertibi[0, t - 1] * self.A[0, j], 0
-                for i in range(1, self.num_s):
-                    tmp_prob = vertibi[i, t - 1] * self.A[i, j]
-                    if tmp_prob > best_prob:
-                        best_prob = tmp_prob
-                        best_prev = i
-                vertibi[j, t] = best_prob * self.B[j, oidx]
+                tmp = vertibi[:, t - 1] * self.A[:, j]
+                best_prev = tmp.argmax()
                 prev[j, t] = best_prev
+                vertibi[j, t] = tmp[best_prev] * self.B[j, oidx]
         return vertibi, prev
 
     def get_prob_of_observation_forward(self, obs):
@@ -133,7 +125,7 @@ class HMM(object):
             return None
         alpha = self.calc_alpha(obs)
         if self.verbose:
-            print 'alpha:\n', alpha
+            print '\nalpha:\n', alpha
         return alpha[:, num_obs - 1].sum()
 
     def get_prob_of_observation_backward(self, obs):
@@ -142,7 +134,7 @@ class HMM(object):
             return None
         beta = self.calc_beta(obs)
         if self.verbose:
-            print 'beta:\n', beta
+            print '\nbeta:\n', beta
         return (self.pi * self.B[:, self.O2idx[obs[0]]] * beta[:, 0]).sum()
 
     def get_best_status_sequence(self, obs):
@@ -154,15 +146,15 @@ class HMM(object):
         tmp_status = np.argmax(vertibi[:, -1])
         best_status.append(tmp_status)
         for t in range(num_obs - 1, 0, -1):
-            tmp_status = prev[tmp_status, t]
+            tmp_status = prev[int(tmp_status), t]
             best_status.append(tmp_status)
         best_status = best_status[::-1]
         if self.verbose:
-            print 'vertibi:\n', vertibi
-            print 'prev:\n', prev
+            print '\nvertibi:\n', vertibi
+            print '\nprev:\n', prev
         return self.Status[best_status]
 
-    def Baum_Welch_algorithm(self, Status, Observations, obs, max_iter = 100):
+    def Baum_Welch_algorithm(self, obs, Status = None, Observations = None, max_iter = 100, min_change = 1e-5):
         '''
         epsilon[i, j, t] = P
         gamma[i, t]
@@ -171,32 +163,65 @@ class HMM(object):
         if num_obs == 0:
             return
         self.init_params(Status, Observations)
+        tarr = np.zeros((self.num_o, num_obs))
+        tarr[:, :] = np.array(range(self.num_o))[:, np.newaxis]
+        sigma = (tarr == np.array(self.O2idx[obs])) + 0
+        if self.verbose:
+            print '\nsigma:\n', sigma
+        log_prob_o_given_lambda, log_prob_o_given_lambda_old = None, None
         for itr in range(max_iter):
-            alpha = self.calc_alpha()
-            beta = self.calc_beta()
+            alpha = self.calc_alpha(obs)
+            beta = self.calc_beta(obs)
             epsilon = np.zeros((self.num_s, self.num_s, num_obs))
             gamma = alpha * beta
             gamma /= gamma.sum(axis=0)
             for t in range(num_obs - 1):
                 oidx_t1 = self.O2idx[obs[t + 1]]
+                epsilon[:, :, t] = alpha[:, t][:, np.newaxis]
                 for i in range(self.num_s):
-                    for j in range(self.num_s):
-                        epsilon[i, j, t] = alpha[i, t] * self.A[i, j] * self.B[j, oidx_t1] * beta[j, t + 1]
+                    epsilon[i, :, t] *= self.A[i, :] * self.B[:, oidx_t1] * beta[:, t + 1]
                 tsum = epsilon[:, :, t].sum()
                 epsilon[:, :, t] /= tsum
+            status_expectation = gamma.sum(axis=1)
+            status_from_expectation = status_expectation - gamma[:, -1]
+            # pi_i = gamma[i, 0]
+            self.pi = gamma[:, 0]
+            # a_{ij} = \frac{\Sigma_{t=1}^{T-1} epsilon[i, j, t]}{\Sigma_{t=1}^{T-1} gamma[i, t]}
+            self.A = epsilon[:, :, :-1].sum(axis=2) / status_from_expectation[:, np.newaxis]
+            # b_{jk} = \frac{\Sigma_{t=1}^{T} gamma[j, t] * \sigma(o_t, v_k)}{\Sigma_{t=1}^{T} gamma[j, t]}, where \sigma(o_t, v_k) = 1 if o_t == v_k else 0
+            self.B = np.dot(gamma, sigma.T) / status_expectation[:, np.newaxis]
+            if self.verbose:
+                print '\n\n*** iter', itr, '***\n'
+                print '\nalpha:\n', alpha
+                print '\nbeta:\n', beta
+                print '\nepsilon:\n', epsilon
+                print '\nsigma:\n', gamma
+                print '\npi:\n', self.pi
+                print '\nA:\n', self.A
+                print '\nB:\n', self.B
+            log_prob_o_given_lambda = np.log(self.get_prob_of_observation_forward(obs))
+            if log_prob_o_given_lambda_old and abs(log_prob_o_given_lambda - log_prob_o_given_lambda_old) < min_change:
+                break
+            log_prob_o_given_lambda_old = log_prob_o_given_lambda
 
 
+        if self.verbose:
+            print '\npi:\n', self.pi
+            print '\nA:\n', self.A
+            print '\nB:\n', self.B
 
 
 def main():
     hmm = HMM(verbose=True)
     hmm.read_params()
     obs = ['H', 'H', 'T']
-    prob_f = hmm.get_prob_of_observation_forward(obs)
-    prob_b = hmm.get_prob_of_observation_backward(obs)
-    best_status = hmm.get_best_status_sequence(obs)
-    print prob_f, prob_b
-    print best_status
+    # prob_f = hmm.get_prob_of_observation_forward(obs)
+    # prob_b = hmm.get_prob_of_observation_backward(obs)
+    # best_status = hmm.get_best_status_sequence(obs)
+    # print prob_f, prob_b
+    # print list(best_status)
+    # test Baum_Welch_algorithm
+    hmm.Baum_Welch_algorithm(obs, max_iter=10, min_change=1e-5)
 
 
 if __name__ == '__main__':
