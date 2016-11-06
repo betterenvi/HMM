@@ -219,13 +219,13 @@ class HMM(object):
 
 def main():
     hmm = HMM(verbose=False)
-    hmm.read_params()
     obs = ['H', 'H', 'T']
-    prob_f = hmm.get_prob_of_observation_forward(obs)
-    prob_b = hmm.get_prob_of_observation_backward(obs)
-    best_status = hmm.get_best_status_sequence(obs)
-    print prob_f, prob_b
-    print list(best_status)
+    if hmm.read_params():
+        prob_f = hmm.get_prob_of_observation_forward(obs)
+        prob_b = hmm.get_prob_of_observation_backward(obs)
+        best_status = hmm.get_best_status_sequence(obs)
+        print prob_f, prob_b
+        print list(best_status)
     # test Baum_Welch_algorithm
     hmm.Baum_Welch_algorithm(obs, max_iter=10, min_change=1e-5)
 
