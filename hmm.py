@@ -81,6 +81,7 @@ class HMM(object):
             oidx = self.O2idx[obs[t]]
             for j in range(self.num_s):
                 alpha[j, t] = (alpha[:, t - 1] * self.A[:, j]).sum() * self.B[j, oidx]
+        self.alpha = alpha
         return alpha
 
     def calc_beta(self, obs):
@@ -95,6 +96,7 @@ class HMM(object):
             oidx_t1 = self.O2idx[obs[t + 1]]
             for i in range(self.num_s):
                 beta[i, t] = (self.A[i, :] * self.B[:, oidx_t1] * beta[:, t + 1]).sum()
+        self.beta = beta
         return beta
 
     def calc_vertibi_and_prev(self, obs):
@@ -117,41 +119,46 @@ class HMM(object):
                 best_prev = tmp.argmax()
                 prev[j, t] = best_prev
                 vertibi[j, t] = tmp[best_prev] * self.B[j, oidx]
+        self.vertibi = vertibi
+        self.prev = prev
         return vertibi, prev
 
-    def get_prob_of_observation_forward(self, obs):
+    def get_prob_of_observation_forward(self, obs, calc=True):
         num_obs = len(obs)
         if num_obs == 0:
             return None
-        alpha = self.calc_alpha(obs)
+        if calc:
+            self.calc_alpha(obs)
         if self.verbose:
-            print '\nalpha:\n', alpha
-        return alpha[:, num_obs - 1].sum()
+            print '\nalpha:\n', self.alpha
+        return self.alpha[:, num_obs - 1].sum()
 
-    def get_prob_of_observation_backward(self, obs):
+    def get_prob_of_observation_backward(self, obs, calc=True):
         num_obs = len(obs)
         if num_obs == 0:
             return None
-        beta = self.calc_beta(obs)
+        if calc:
+            self.calc_beta(obs)
         if self.verbose:
-            print '\nbeta:\n', beta
-        return (self.pi * self.B[:, self.O2idx[obs[0]]] * beta[:, 0]).sum()
+            print '\nbeta:\n', self.beta
+        return (self.pi * self.B[:, self.O2idx[obs[0]]] * self.beta[:, 0]).sum()
 
-    def get_best_status_sequence(self, obs):
+    def get_best_status_sequence(self, obs, calc=True):
         best_status = []
         num_obs = len(obs)
         if num_obs == 0:
             return best_status
-        vertibi, prev = self.calc_vertibi_and_prev(obs)
-        tmp_status = np.argmax(vertibi[:, -1])
+        if calc:
+            self.calc_vertibi_and_prev(obs)
+        tmp_status = np.argmax(self.vertibi[:, -1])
         best_status.append(tmp_status)
         for t in range(num_obs - 1, 0, -1):
-            tmp_status = prev[int(tmp_status), t]
+            tmp_status = self.prev[int(tmp_status), t]
             best_status.append(tmp_status)
         best_status = best_status[::-1]
         if self.verbose:
-            print '\nvertibi:\n', vertibi
-            print '\nprev:\n', prev
+            print '\nvertibi:\n', self.vertibi
+            print '\nprev:\n', self.prev
         return self.Status[best_status]
 
     def Baum_Welch_algorithm(self, obs, Status = None, Observations = None, max_iter = 100, min_change = 1e-5):
@@ -199,30 +206,28 @@ class HMM(object):
                 print '\npi:\n', self.pi
                 print '\nA:\n', self.A
                 print '\nB:\n', self.B
-            log_prob_o_given_lambda = np.log(self.get_prob_of_observation_forward(obs))
+            log_prob_o_given_lambda = np.log(self.get_prob_of_observation_forward(obs, calc=False))
             if log_prob_o_given_lambda_old and abs(log_prob_o_given_lambda - log_prob_o_given_lambda_old) < min_change:
                 break
             log_prob_o_given_lambda_old = log_prob_o_given_lambda
 
 
-        if self.verbose:
-            print '\npi:\n', self.pi
-            print '\nA:\n', self.A
-            print '\nB:\n', self.B
+        print '\npi:\n', self.pi
+        print '\nA:\n', self.A
+        print '\nB:\n', self.B
 
 
 def main():
-    hmm = HMM(verbose=True)
+    hmm = HMM(verbose=False)
     hmm.read_params()
     obs = ['H', 'H', 'T']
-    # prob_f = hmm.get_prob_of_observation_forward(obs)
-    # prob_b = hmm.get_prob_of_observation_backward(obs)
-    # best_status = hmm.get_best_status_sequence(obs)
-    # print prob_f, prob_b
-    # print list(best_status)
+    prob_f = hmm.get_prob_of_observation_forward(obs)
+    prob_b = hmm.get_prob_of_observation_backward(obs)
+    best_status = hmm.get_best_status_sequence(obs)
+    print prob_f, prob_b
+    print list(best_status)
     # test Baum_Welch_algorithm
     hmm.Baum_Welch_algorithm(obs, max_iter=10, min_change=1e-5)
-
 
 if __name__ == '__main__':
     main()
